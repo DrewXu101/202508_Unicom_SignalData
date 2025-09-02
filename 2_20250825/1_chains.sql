@@ -346,69 +346,123 @@ CREATE TABLE chained_trips_202311 AS SELECT
     FROM
         tagged_202311_tmp; 
 
+-- 先做一个“按 uid 的两期是否出现”的临时表（用于 semi_local / non_local 的判定）
+DROP TABLE IF EXISTS uid_period_presence_trip_tmp;
+CREATE TABLE uid_period_presence_trip_tmp AS
+SELECT
+  uid,
+  MAX(CASE WHEN stat_month = '202208' THEN 1 ELSE 0 END) AS has_202208,
+  MAX(CASE WHEN stat_month = '202311' THEN 1 ELSE 0 END) AS has_202311
+FROM (
+  SELECT DISTINCT uid, stat_month FROM chained_trips_202208
+  UNION ALL
+  SELECT DISTINCT uid, stat_month FROM chained_trips_202311
+) u
+GROUP BY uid
+;
+
 -- age group aggregation, august
 
+-- 1) 202208 版本
 DROP TABLE IF EXISTS chained_trips_202208_ag;
 CREATE TABLE chained_trips_202208_ag AS
 SELECT
-  uid,
-  date,
-  stat_month,
-  chain_trip_id,
-  stime,
-  etime,
-  final_grid_id,
-  home_grid,
-  is_home,
-  distance,
-  `time`,
-  is_core,
-  moi_id,
-  start_ptype,
-  end_ptype,
-  province,
-  gender,
-  age,
+  c.uid,
+  c.`date`,
+  c.stat_month,
+  c.chain_trip_id,
+  c.stime,
+  c.etime,
+  c.final_grid_id,
+  c.home_grid,
+  c.is_home,
+  c.distance,
+  c.`time`,
+  c.is_core,
+  c.moi_id,
+  c.start_ptype,
+  c.end_ptype,
+  c.province,
+  c.gender,
+  c.age,
+  ua.id_area,   -- 加入 id_area
   CASE
-    WHEN age IN ('01','02','03','04') THEN 1
-    WHEN age IN ('05','06','07')      THEN 2
-    WHEN age IN ('08','09','10')      THEN 3
-    WHEN age IN ('11','12','13','14','15') THEN 4
+    WHEN c.age IN ('01','02','03','04')                THEN 1
+    WHEN c.age IN ('05','06','07')                     THEN 2
+    WHEN c.age IN ('08','09','10')                     THEN 3
+    WHEN c.age IN ('11','12','13','14','15')           THEN 4
     ELSE NULL
-  END AS age_group
-FROM chained_trips_202208;
+  END AS age_group,
+  CASE
+    WHEN c.is_core = 'Y'
+         AND ua.id_area IS NOT NULL
+         AND substr(ua.id_area,1,2) = '11'
+      THEN 'local'
+    WHEN (c.is_core <> 'Y' OR substr(ua.id_area,1,2) <> '11')
+         AND p.has_202208 = 1 AND p.has_202311 = 1
+      THEN 'semi_local'
+    WHEN (c.is_core <> 'Y' OR substr(ua.id_area,1,2) <> '11')
+         AND (COALESCE(p.has_202208,0) + COALESCE(p.has_202311,0)) = 1
+      THEN 'non_local'
+    ELSE 'unknown'
+  END AS residency_group
+FROM chained_trips_202208 c
+LEFT JOIN (SELECT DISTINCT uid, id_area FROM user_attribute) ua
+  ON c.uid = ua.uid
+LEFT JOIN uid_period_presence_trip_tmp p
+  ON c.uid = p.uid
+;
 
 -- age group aggregation, november 
 
 DROP TABLE IF EXISTS chained_trips_202311_ag;
 CREATE TABLE chained_trips_202311_ag AS
 SELECT
-  uid,
-  date,
-  stat_month,
-  chain_trip_id,
-  stime,
-  etime,
-  final_grid_id,
-  home_grid,
-  is_home,
-  distance,
-  `time`,
-  is_core,
-  moi_id,
-  start_ptype,
-  end_ptype,
-  province,
-  gender,
-  age,
+  c.uid,
+  c.`date`,
+  c.stat_month,
+  c.chain_trip_id,
+  c.stime,
+  c.etime,
+  c.final_grid_id,
+  c.home_grid,
+  c.is_home,
+  c.distance,
+  c.`time`,
+  c.is_core,
+  c.moi_id,
+  c.start_ptype,
+  c.end_ptype,
+  c.province,
+  c.gender,
+  c.age,
+  ua.id_area,
   CASE
-    WHEN age IN ('01','02','03','04') THEN 1
-    WHEN age IN ('05','06','07')      THEN 2
-    WHEN age IN ('08','09','10')      THEN 3
-    WHEN age IN ('11','12','13','14','15') THEN 4
+    WHEN c.age IN ('01','02','03','04')                THEN 1
+    WHEN c.age IN ('05','06','07')                     THEN 2
+    WHEN c.age IN ('08','09','10')                     THEN 3
+    WHEN c.age IN ('11','12','13','14','15')           THEN 4
     ELSE NULL
-  END AS age_group
-FROM chained_trips_202311;
+  END AS age_group,
+  CASE
+    WHEN c.is_core = 'Y'
+         AND ua.id_area IS NOT NULL
+         AND substr(ua.id_area,1,2) = '11'
+      THEN 'local'
+    WHEN (c.is_core <> 'Y' OR substr(ua.id_area,1,2) <> '11')
+         AND p.has_202208 = 1 AND p.has_202311 = 1
+      THEN 'semi_local'
+    WHEN (c.is_core <> 'Y' OR substr(ua.id_area,1,2) <> '11')
+         AND (COALESCE(p.has_202208,0) + COALESCE(p.has_202311,0)) = 1
+      THEN 'non_local'
+    ELSE 'unknown'
+  END AS residency_group
+FROM chained_trips_202311 c
+LEFT JOIN (SELECT DISTINCT uid, id_area FROM user_attribute) ua
+  ON c.uid = ua.uid
+LEFT JOIN uid_period_presence_trip_tmp p
+  ON c.uid = p.uid
+;
         
 -- Descriptive Analysis 
 -- Step 1: 先得到链级别指标
@@ -421,14 +475,17 @@ SELECT
   chain_trip_id,
   gender,
   age_group,
-  is_core,
-  COUNT(*) AS chain_length,                  
-  /* 链时长（秒） */
-  ( UNIX_TIMESTAMP(MAX(etime)) - UNIX_TIMESTAMP(MIN(stime)) ) AS chain_duration_sec,
-  SUM(distance) AS chain_total_distance,     
-  MAX(CASE WHEN is_core = '1' AND province = '011' THEN 1 ELSE 0 END) AS is_local
+  residency_group,
+  COUNT(*) AS chain_length,  -- 该链包含的记录数
+  -- 链时长（秒）
+  (UNIX_TIMESTAMP(MAX(etime)) - UNIX_TIMESTAMP(MIN(stime))) AS chain_duration_sec,
+  -- 链时长（分钟/小时，便于分析；如不需要可删）
+  (UNIX_TIMESTAMP(MAX(etime)) - UNIX_TIMESTAMP(MIN(stime))) / 60.0  AS chain_duration_min,
+  (UNIX_TIMESTAMP(MAX(etime)) - UNIX_TIMESTAMP(MIN(stime))) / 3600.0 AS chain_duration_hr,
+  -- 总里程（与源表单位一致，若为米可 /1000 转为公里）
+  SUM(distance) AS chain_total_distance
 FROM chained_trips_202208_ag
-GROUP BY uid, `date`, chain_trip_id, gender, age_group, is_core;
+GROUP BY uid, `date`, chain_trip_id, gender, age_group, residency_group;
 
 -- 202311
 DROP TABLE IF EXISTS chain_summary_202311_ag;
@@ -439,14 +496,21 @@ SELECT
   chain_trip_id,
   gender,
   age_group,
-  is_core,
-  COUNT(*) AS chain_length,
-  ( UNIX_TIMESTAMP(MAX(etime)) - UNIX_TIMESTAMP(MIN(stime)) ) AS chain_duration_sec,
+  residency_group,
+  COUNT(*) AS chain_length,  -- 该链包含的记录数
+  -- 链时长（秒/分/小时）
+  (UNIX_TIMESTAMP(MAX(etime)) - UNIX_TIMESTAMP(MIN(stime)))              AS chain_duration_sec,
+  (UNIX_TIMESTAMP(MAX(etime)) - UNIX_TIMESTAMP(MIN(stime))) / 60.0       AS chain_duration_min,
+  (UNIX_TIMESTAMP(MAX(etime)) - UNIX_TIMESTAMP(MIN(stime))) / 3600.0     AS chain_duration_hr,
+  -- 总里程（与源表单位一致）
   SUM(distance) AS chain_total_distance,
-  MAX(CASE WHEN is_core = '1' AND province = '011' THEN 1 ELSE 0 END) AS is_local
+  -- 本地标记（新定义：省份编码前两位='11'）
+  MAX(CASE 
+        WHEN SUBSTR(province, 1, 2) = '11' 
+        THEN 1 ELSE 0 
+      END) AS is_local
 FROM chained_trips_202311_ag
-GROUP BY uid, `date`, chain_trip_id, gender, age_group, is_core;
-
+GROUP BY uid, `date`, chain_trip_id, gender, age_group, residency_group;
 
 -- Step 2: 计算用户层面的每日平均链数、链长度和链距离
 -- 202208
@@ -485,8 +549,9 @@ SELECT
   gender,
   age_group,
   is_core,
-  AVG(avg_daily_chains)  AS mean_daily_chains,
-  AVG(avg_chain_length)  AS mean_chain_length,
+  COUNT(*) AS n_obs,  -- 每个组别的观测数
+  AVG(avg_daily_chains)   AS mean_daily_chains,
+  AVG(avg_chain_length)   AS mean_chain_length,
   AVG(avg_chain_distance) AS mean_chain_distance
 FROM user_daily_stats_202208_ag
 GROUP BY gender, age_group, is_core
@@ -497,8 +562,9 @@ SELECT
   gender,
   age_group,
   is_core,
-  AVG(avg_daily_chains)  AS mean_daily_chains,
-  AVG(avg_chain_length)  AS mean_chain_length,
+  COUNT(*) AS n_obs,  -- 每个组别的观测数
+  AVG(avg_daily_chains)   AS mean_daily_chains,
+  AVG(avg_chain_length)   AS mean_chain_length,
   AVG(avg_chain_distance) AS mean_chain_distance
 FROM user_daily_stats_202311_ag
 GROUP BY gender, age_group, is_core
