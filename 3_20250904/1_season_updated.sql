@@ -74,8 +74,7 @@ FROM (
   GROUP BY end_grid_id
 ) t
 JOIN grid g ON g.grid_id = t.grid_id
-ORDER BY t.diff_cnt DESC
-LIMIT 1000;
+ORDER BY t.diff_cnt DESC;
 
 -- 2) 早间 07:00–11:59 到达：负差异最大 1000（end_grid_id）
 SELECT t.grid_id, t.diff_cnt, g.centroid_lat, g.centroid_lon
@@ -93,8 +92,7 @@ FROM (
   GROUP BY end_grid_id
 ) t
 JOIN grid g ON g.grid_id = t.grid_id
-ORDER BY t.diff_cnt ASC
-LIMIT 1000;
+ORDER BY t.diff_cnt ASC;
 
 -- 3) 午后 12:00–23:59 出发：正差异最大 1000（start_grid_id）
 SELECT t.grid_id, t.diff_cnt, g.centroid_lat, g.centroid_lon
@@ -112,8 +110,7 @@ FROM (
   GROUP BY start_grid_id
 ) t
 JOIN grid g ON g.grid_id = t.grid_id
-ORDER BY t.diff_cnt DESC
-LIMIT 1000;
+ORDER BY t.diff_cnt DESC;
 
 -- 4) 午后 12:00–23:59 出发：负差异最大 1000（start_grid_id）
 SELECT t.grid_id, t.diff_cnt, g.centroid_lat, g.centroid_lon
@@ -131,8 +128,7 @@ FROM (
   GROUP BY start_grid_id
 ) t
 JOIN grid g ON g.grid_id = t.grid_id
-ORDER BY t.diff_cnt ASC
-LIMIT 1000;
+ORDER BY t.diff_cnt ASC;
 
 -- Refined demographics, age groups
 
